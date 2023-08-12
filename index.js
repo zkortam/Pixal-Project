@@ -1,4 +1,4 @@
-/* eslint-disable no-await-in-loop */
+//Imports
 import slack_pkg from '@slack/bolt'
 const { App } = slack_pkg
 import { createSession, cleanEmail, stripEmojis, stripBackSlashs, cleanText, CHIP_ACTION_REGEX, ANY_WORD_REGEX } from './components/utils.js'
@@ -7,19 +7,15 @@ import axios from 'axios'
 import { Text } from 'slate'
 import escapeHtml from 'escape-html'
 
+//Constants
 const versionID = process.env.VOICEFLOW_VERSION_ID || 'production'
-let session = `${versionID}.${createSession()}`
-const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY
-const VOICEFLOW_RUNTIME_ENDPOINT = process.env.VOICEFLOW_RUNTIME_ENDPOINT || 'general-runtime.voiceflow.com'
+const projectID = process.env.VOICEFLOW_PROJECT_ID || null
 const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET
-
-let noreply
-let isError = false;
-let errorMessage = '';
-
-// Create the Slack app
+const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY
+const VOICEFLOW_RUNTIME_ENDPOINT = process.env.VOICEFLOW_RUNTIME_ENDPOINT || 'general-runtime.voiceflow.com'
+const activeConversations = {};
 const app = new App({
   signingSecret: SLACK_SIGNING_SECRET,
   token: SLACK_BOT_TOKEN,
@@ -27,7 +23,18 @@ const app = new App({
   appToken: SLACK_APP_TOKEN,
 })
 
-// Slack app_mention event
+//Initializations
+let session = `${versionID}.${createSession()}`
+let noreply
+let isError = false;
+let errorMessage = '';
+
+; (async () => {
+    await app.start()
+    console.log(`⚡️ Bolt app is running!`)
+  })()
+
+//Mentions
 app.event('app_mention', async ({ event, client, say }) => {
   try {
 
@@ -36,8 +43,7 @@ app.event('app_mention', async ({ event, client, say }) => {
     })
 
     let userName = i.user.profile.real_name_normalized
-
-    await say(`Hi ${userName}`)
+    
     let utterance = event.text.split('>')[1]
     utterance = stripEmojis(utterance)
     utterance = cleanEmail(utterance)
@@ -56,7 +62,7 @@ app.event('app_mention', async ({ event, client, say }) => {
   }
 })
 
-// Listen for users opening your App Home
+//Listen
 app.event('app_home_opened', async ({ event, client }) => {
   Home.show(client, event)
 })
@@ -93,40 +99,44 @@ app.action(CHIP_ACTION_REGEX, async ({ action, say, ack, client }) => {
   }
 })
 
-app.message(ANY_WORD_REGEX, async ({ message, say, client }) => {
-  // Ignoring some message types
-  if (
-    message.subtype === 'message_changed' ||
-    message.subtype === 'message_deleted' ||
-    message.subtype === 'message_replied'
-  )
-    return
-
-  // Cleaning user's utterance from Slack
-  let utterance = stripEmojis(message.text)
-  // Formating Slack email format from <mailto:name@email.com|name@email.com> to name@email.com
-  utterance = cleanEmail(utterance)
-
-  console.log('Utterance:', utterance)
-
-  if (utterance === 'hi' || utterance === 'hi there') {
-    await interact(message.user, say, client, {
-      type: 'launch',
-    })
-  } else {
+//Message Triggers
+app.message(async ({ message, say, client }) => {
+  if (message.channel_type === 'im') {
+    let utterance = stripEmojis(message.text);
+    utterance = cleanEmail(utterance);
+    console.log('Utterance (DM):', utterance);
     await interact(message.user, say, client, {
       type: 'text',
       payload: utterance,
-    })
+    });
+  } else {
+    const botMentioned = message.text.includes('@Pixal');
+    if (botMentioned && !activeConversations[message.channel]) {
+      activeConversations[message.channel] = message.user;
+      const userPrompt = message.text.replace(/<@Pixal>/i, '').trim();
+      await say({
+        text: 'Hi there! How can I assist you?',
+      });
+      if (userPrompt) {
+        await interact(message.user, say, client, {
+          type: 'text',
+          payload: userPrompt,
+        });
+      }
+      return;
+    }
+    if (activeConversations[message.channel] === message.user) {
+      let utterance = stripEmojis(message.text);
+      utterance = cleanEmail(utterance);
+      console.log('Utterance (Channel, Ongoing Conversation):', utterance);
+      await interact(message.user, say, client, {
+        type: 'text',
+        payload: utterance,
+      });
+    }
   }
-})
-;(async () => {
-  // Start the app
-  await app.start()
-  console.log(`⚡️ Bolt app is running!`)
-})()
+});
 
-// Interact with Voiceflow | Dialog Manager API
 async function interact(userID, say, client, request) {
   clearTimeout(noreply);
   let i = await client.users.info({
@@ -134,8 +144,6 @@ async function interact(userID, say, client, request) {
   })
   let userName = i.user.profile.real_name_normalized
   let userPix = i.user.profile.image_48
-
-  // call the Voiceflow API with the user's name & request, get back a response
   try {
     const response = await axios({
       method: 'POST',
@@ -170,8 +178,6 @@ async function interact(userID, say, client, request) {
                     tags = tags + '_';
                   }
                   if (node.underline) {
-                    // ignoring underline tag as Slack doesn't support it
-                    // https://api.slack.com/reference/surfaces/formatting
                   }
                   if (node.strikeThrough) {
                     tags = tags + '~';
@@ -189,7 +195,6 @@ async function interact(userID, say, client, request) {
                 }
               };
 
-              // Render slate content
               let renderedMessage = trace.payload.slate.content
                 .map((slateData) => slateData.children.map((slateChild) => serialize(slateChild)).join(''))
                 .join('\n');
@@ -208,7 +213,6 @@ async function interact(userID, say, client, request) {
                   ],
                 });
               } catch (error) {
-                // Avoid breaking the Bot by ignoring then content if not supported
                 console.log('Not supported yet');
                 return false;
               }
@@ -240,7 +244,6 @@ async function interact(userID, say, client, request) {
                   ],
                 });
               } catch (error) {
-                // Avoid breaking the Bot by ignoring then content if not supported
                 console.log('Not supported yet');
                 return false;
               }
@@ -311,7 +314,7 @@ async function interact(userID, say, client, request) {
             break;
           }
           case 'no-reply': {
-            noreply = setTimeout(function () {
+            noreply = setTimeout(function() {
               interact(userID, say, client, {
                 type: 'no-reply',
               });
@@ -374,39 +377,41 @@ async function interact(userID, say, client, request) {
   }
   return true;
 }
-
 async function saveTranscript(username, userpix) {
-  console.log('SAVE TRANSCRIPT')
-  if (!username || username == '' || username == undefined) {
-    username = 'Anonymous';
-    userpix = 'https://avatars.slack-edge.com/2021-03-20/1879385687829_370801c602af840e43f8_192.png';
-  }
-  axios({
-    method: 'put',
-    url: 'https://api.voiceflow.com/v2/transcripts',
-    data: {
-      browser: 'Slack',
-      device: 'desktop',
-      os: 'macOS',
-      sessionID: session,
-      unread: true,
-      versionID: versionID,
-      notes: errorMessage == '' ? '' : errorMessage,
-      reportTags: isError == true ? ['system.saved'] : [],
-      user: {
-        name: username,
-        image: userpix,
+  if (projectID) {
+    console.log('SAVE TRANSCRIPT')
+    if (!username || username == '' || username == undefined) {
+      username = 'Anonymous';
+      userpix = 'https://avatars.slack-edge.com/2021-03-20/1879385687829_370801c602af840e43f8_192.png';
+    }
+    axios({
+      method: 'put',
+      url: 'https://api.voiceflow.com/v2/transcripts',
+      data: {
+        browser: 'Slack',
+        device: 'desktop',
+        os: 'macOS',
+        sessionID: session,
+        unread: true,
+        versionID: versionID,
+        projectID: projectID,
+        notes: errorMessage == '' ? '' : errorMessage,
+        reportTags: isError == true ? ['system.saved'] : [],
+        user: {
+          name: username,
+          image: userpix,
+        },
       },
-    },
-    headers: {
-      Authorization: VOICEFLOW_API_KEY,
-    },
-  })
-    .then(function (response) {
-      console.log('Saved!');
-      isError = false;
-      errorMessage = '';
-      session = `${process.env.VOICEFLOW_VERSION_ID}.${createSession()}`;
+      headers: {
+        Authorization: VOICEFLOW_API_KEY,
+      },
     })
-    .catch((err) => console.log(err));
+      .then(function(response) {
+        console.log('Saved!');
+        isError = false;
+        errorMessage = '';
+        session = `${process.env.VOICEFLOW_VERSION_ID}.${createSession()}`;
+      })
+      .catch((err) => console.log(err));
+  }
 }
