@@ -1,7 +1,7 @@
 {
-  "name": "voiceflow-slackbot",
-  "version": "1.0.2",
-  "description": "Use Voiceflow to run a Slack Bot with Dialog Manager API",
+  "name": "Pixal",
+  "version": "1.0.0",
+  "description": "Generative AI Project for ACC",
   "main": "index.js",
   "sourceType": "module",
   "type": "module",
@@ -21,7 +21,7 @@
     "bot",
     "api"
   ],
-  "author": "Nicolas Arcay Bermejo",
+  "author": "Nicolas Arcay Bermejo - Modified by Zakaria Kortam",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/voiceflow-gallagan/heroku-vf-slackbot/issues"
