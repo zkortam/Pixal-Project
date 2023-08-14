@@ -1,6 +1,6 @@
-#Developed for the ACC Technical Project #
-##Pixal ##
-###Zakaria Kortam###
+#Developed for the ACC Technical Project
+#Pixal
+#Zakaria Kortam
 
 Pixal is an AI Slack App that enables workspace members to have easier access to 
 information pertaining to their workspace. This app was created with the assistance of 
